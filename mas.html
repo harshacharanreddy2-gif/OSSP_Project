@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MAS: Multi-Agent Execution & Resource Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f4;--panel:#fff;--ink:#1b2430;--mut:#5d6b7c;--line:#d3dae2;--acc:#2f54eb;--warn:#c2410c;--free:#e4e9ef;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10151c;--panel:#18202a;--ink:#e6ebf1;--mut:#92a0b2;--line:#2b3644;--acc:#7f9cff;--warn:#fb923c;--free:#222c38}}
+:root[data-theme="dark"]{--bg:#10151c;--panel:#18202a;--ink:#e6ebf1;--mut:#92a0b2;--line:#2b3644;--acc:#7f9cff;--warn:#fb923c;--free:#222c38}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif}
+h1,h2,h3{font-family:"Space Grotesk",system-ui,sans-serif;margin:0;letter-spacing:-.01em}
+main{max-width:1000px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:clamp(28px,5vw,44px);line-height:1.1;max-width:20ch}
+.lead{color:var(--mut);max-width:62ch;margin:12px 0 24px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+h2{font-size:18px;margin-bottom:10px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+label{font-size:13px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+input{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:110px}
+button{font:600 14px "Space Grotesk",sans-serif;padding:9px 14px;border-radius:6px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--acc)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.grid{display:grid;grid-template-columns:repeat(16,1fr);gap:4px;margin:6px 0 10px}
+.fr{aspect-ratio:1;border-radius:4px;background:var(--free);display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;transition:background .25s}
+.stats{display:flex;gap:22px;flex-wrap:wrap;font-size:14px;color:var(--mut)}.stats b{color:var(--ink);font-size:20px;font-family:"Space Grotesk"}
+.cpus{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cpu{border:1px dashed var(--line);border-radius:8px;padding:10px;min-height:68px;font-size:14px}
+.cpu.on{border-style:solid;border-color:var(--acc)}
+.bar{height:5px;background:var(--free);border-radius:3px;margin-top:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+.cpu.pf{border-color:var(--warn)}.pf small{color:var(--warn)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.cols{grid-template-columns:1fr}}
+pre{margin:0;max-height:200px;overflow:auto;font:12.5px/1.5 ui-monospace,Menlo,monospace;color:var(--mut);white-space:pre-wrap}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.scroll{overflow-x:auto}
+.map td:first-child{font-weight:600;white-space:nowrap}
+</style></head><body><main>
+<h1>Run AI agents as real processes. Watch them share memory.</h1>
+<p class="lead">This page simulates the <code>mas.c</code> orchestrator: 3 CPU slots, 16 memory frames, and one agent per task. Submit tasks and see when agents run, wait for a free CPU slot, or hit a page fault.</p>
+
+<div class="panel">
+<h2>Submit a task</h2>
+<div class="row">
+<label>Name<input id="n" value="summarize" maxlength="12"></label>
+<label>Duration (sec)<input id="d" type="number" min="1" max="30" value="6"></label>
+<label>Pages (1–8)<input id="p" type="number" min="1" max="8" value="4"></label>
+<button id="add">Submit task</button>
+<button class="ghost" id="burst">Submit 6 random tasks</button>
+<button class="ghost" id="reset">Reset</button>
+</div></div>
+
+<div class="panel">
+<h2>Memory frames</h2>
+<div class="grid" id="frames"></div>
+<div class="stats"><span>Free <b id="sf">16</b>/16</span><span>Submitted <b id="ss">0</b></span><span>Completed <b id="sc">0</b></span><span>Queued <b id="sq">0</b></span></div>
+</div>
+
+<div class="panel"><h2>CPU slots</h2><div class="cpus" id="cpus"></div></div>
+
+<div class="cols">
+<div class="panel"><h2>Event log</h2><pre id="log">Ready. Submit a task to begin.</pre></div>
+<div class="panel"><h2>Agents</h2><div class="scroll"><table><thead><tr><th>ID</th><th>Name</th><th>Pages</th><th>Status</th></tr></thead><tbody id="tb"></tbody></table></div></div>
+</div>
+
+<div class="panel">
+<h2>How each part of the C code works</h2>
+<div class="scroll"><table class="map">
+<tr><td>Agent process</td><td><code>fork()</code> then <code>exec("/proc/self/exe", "--agent")</code>: the same binary restarts as a separate process.</td></tr>
+<tr><td>CPU slots</td><td>A counting semaphore starting at 3. The scheduler waits on it before each fork; the SIGCHLD handler posts it back.</td></tr>
+<tr><td>Memory frames</td><td>A POSIX shared-memory table with a process-shared mutex and condition variable. An agent waits for free frames (a simulated page fault).</td></tr>
+<tr><td>Task hand-off</td><td>An anonymous pipe on fd 3 carries the task from the scheduler to the new agent.</td></tr>
+<tr><td>Results</td><td>Agents append to a log, write fixed-size records with <code>lseek()</code>, and report through a FIFO.</td></tr>
+<tr><td>Live status</td><td>A UNIX socket answers <code>./mas --status</code> from a second terminal.</td></tr>
+</table></div>
+<p style="color:var(--mut);font-size:14px;margin:12px 0 0">Build: <code>gcc -pthread -std=gnu11 -o mas mas.c -lpthread -lrt</code> &nbsp; Run: <code>./mas</code>, then <code>submit summarize 6 4</code></p>
+</div>
+</main>
+<script>
+const TOTAL=16,CPUS=3,COL=["#2f54eb","#0f9d77","#c026d3","#d97706","#0891b2","#dc2626","#7c3aed","#4d7c0f"];
+let S;function init(){S={q:[],cpu:[null,null,null],own:Array(TOTAL).fill(0),all:[],id:1,sub:0,done:0,logs:[]}}
+const $=i=>document.getElementById(i);
+function log(m){S.logs.push(m);if(S.logs.length>60)S.logs.shift();$("log").textContent=S.logs.join("\n");$("log").scrollTop=1e9}
+const free=()=>S.own.filter(x=>!x).length;
+function submit(name,d,p){p=Math.max(1,Math.min(8,p|0||2));d=Math.max(1,d|0||1);
+const t={id:S.id++,name:name||"task",d,p,st:"queued",left:d};S.q.push(t);S.all.push(t);log(`queued #${t.id} "${t.name}" (${d}s, ${p} pages)`);draw()}
+function tick(){
+ // scheduler: take a CPU slot, then agent tries to get frames
+ for(let i=0;i<CPUS;i++)if(!S.cpu[i]&&S.q.length){const t=S.q.shift();S.cpu[i]=t;t.st="waiting";S.sub++;log(`dispatched #${t.id} to CPU ${i+1}`)}
+ S.cpu.forEach((t,i)=>{if(!t)return;
+  if(t.st==="waiting"){
+   if(free()>=t.p){let g=0;for(let f=0;f<TOTAL&&g<t.p;f++)if(!S.own[f]){S.own[f]=t.id;g++}t.st="running";log(`#${t.id} got ${t.p} frames, running`)}
+   else if(!t.pf){t.pf=1;log(`#${t.id} PAGE FAULT: needs ${t.p}, ${free()} free, waiting`)}
+  }else if(t.st==="running"){t.left-=.5;
+   if(t.left<=0){for(let f=0;f<TOTAL;f++)if(S.own[f]===t.id)S.own[f]=0;t.st="done";S.done++;S.cpu[i]=null;log(`#${t.id} done, frames freed, CPU ${i+1} free`)}}
+ });draw()}
+function draw(){
+ $("frames").innerHTML=S.own.map(o=>`<div class="fr" style="${o?'background:'+COL[(o-1)%8]:''}">${o||""}</div>`).join("");
+ $("sf").textContent=free();$("ss").textContent=S.sub;$("sc").textContent=S.done;$("sq").textContent=S.q.length;
+ $("cpus").innerHTML=S.cpu.map((t,i)=>t?`<div class="cpu on ${t.st==='waiting'?'pf':''}"><b>CPU ${i+1}</b> #${t.id} ${t.name}<br>${t.st==='waiting'?'<small>page fault: waiting for frames</small>':`<small>${t.p} pages</small><div class="bar"><i style="width:${100*(1-t.left/t.d)}%"></i></div>`}</div>`:`<div class="cpu"><b>CPU ${i+1}</b><br><small style="color:var(--mut)">idle</small></div>`).join("");
+ $("tb").innerHTML=S.all.slice(-12).map(t=>`<tr><td>${t.id}</td><td>${t.name}</td><td>${t.p}</td><td>${t.st}</td></tr>`).join("")||`<tr><td colspan="4" style="color:var(--mut)">No agents yet.</td></tr>`}
+$("add").onclick=()=>submit($("n").value.trim()||"task",+$("d").value,+$("p").value);
+$("burst").onclick=()=>["parse","embed","plan","search","write","review"].forEach(n=>submit(n,2+Math.floor(Math.random()*8),1+Math.floor(Math.random()*8)));
+$("reset").onclick=()=>{init();$("log").textContent="Reset.";draw()};
+init();draw();setInterval(tick,500);
+</script></body></html>
